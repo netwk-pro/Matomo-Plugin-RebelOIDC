@@ -1,6 +1,6 @@
 {
     "name": "RebelOIDC",
-    "version": "5.2.1",
+    "version": "6.0.0",
     "description": "Adds OIDC login to your Matomo instance",
     "keywords": [
         "authentication",
@@ -11,21 +11,21 @@
         "sso"
     ],
     "license": "GPL v3+",
-    "homepage": "https:\/\/github.com\/Digitalist-Open-Cloud\/Matomo-Plugin-RebelOIDC",
+    "homepage": "https://github.com/Digitalist-Open-Cloud/Matomo-Plugin-RebelOIDC",
     "authors": [
         {
             "name": "Digitalist Open Cloud",
             "email": "cloud@digitalist.com",
-            "homepage": "https:\/\/digitalist.cloud"
+            "homepage": "https://digitalist.cloud"
         }
     ],
     "require": {
-        "php": ">=8.0.0",
-        "matomo": ">=5.0.0-stable,<6.0.0-b1"
+        "php": ">=8.1.0",
+        "matomo": ">=6.0.0-b1,<7.0.0-b1"
     },
     "support": {
         "email": "cloud@digitalist.com",
-        "issues": "https:\/\/github.com\/Digitalist-Open-Cloud\/Matomo-Plugin-RebelOIDC\/issues",
-        "source": "https:\/\/github.com\/Digitalist-Open-Cloud\/Matomo-Plugin-RebelOIDC"
+        "issues": "https://github.com/Digitalist-Open-Cloud/Matomo-Plugin-RebelOIDC/issues",
+        "source": "https://github.com/Digitalist-Open-Cloud/Matomo-Plugin-RebelOIDC"
     }
 }

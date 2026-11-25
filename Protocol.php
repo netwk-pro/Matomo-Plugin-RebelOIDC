@@ -48,26 +48,96 @@ class Protocol
     }
 
     /**
-     * The token is not checked for its signature: it comes straight from the token endpoint over
-     * TLS, which OpenID Connect accepts in its place.
+     * Validates the claims of an ID token.
+     *
+     * Cryptographic signature verification must be performed
+     * by the caller before invoking this method.
      *
      * @param array<string, mixed> $claims
-     * @param string $issuer the issuer the token has to be from, or empty to accept any
-     * @throws Exception if the token is not meant for this login
+     * @param string $clientId Expected client identifier
+     * @param string $issuer Expected issuer identifier
+     * @param string $nonce Expected authentication nonce
+     * @param int|null $now Current Unix timestamp
+     * @throws Exception if the token is invalid
      */
-    public static function checkIdToken(array $claims, string $clientId, string $issuer, string $nonce, ?int $now = null): void
-    {
+    public static function checkIdToken(
+        array $claims,
+        string $clientId,
+        string $issuer,
+        string $nonce,
+        ?int $now = null
+    ): void {
         $now = $now ?? time();
-        $audience = (array) ($claims['aud'] ?? []);
 
-        $valid = in_array($clientId, $audience, true)
-            && (count($audience) === 1 || ($claims['azp'] ?? null) === $clientId)
-            && is_numeric($claims['exp'] ?? null) && $claims['exp'] > $now - self::CLOCK_LEEWAY
-            && is_string($claims['nonce'] ?? null) && hash_equals($nonce, $claims['nonce'])
-            && ($issuer === '' || rtrim((string) ($claims['iss'] ?? ''), '/') === rtrim($issuer, '/'));
+        $audience = $claims['aud'] ?? [];
+
+        if (is_string($audience)) {
+            $audience = [$audience];
+        }
+
+        $valid =
+            // Required authentication context.
+            $clientId !== ''
+            && $issuer !== ''
+            && $nonce !== ''
+
+            // Issuer validation.
+            && is_string($claims['iss'] ?? null)
+            && $claims['iss'] === $issuer
+
+            // Subject validation.
+            && is_string($claims['sub'] ?? null)
+            && $claims['sub'] !== ''
+
+            // Audience validation.
+            && is_array($audience)
+            && array_is_list($audience)
+            && count($audience) === 1
+            && in_array($clientId, $audience, true)
+
+            // Authorized party validation.
+            && (
+                !array_key_exists('azp', $claims)
+                || $claims['azp'] === $clientId
+            )
+
+            // Expiration validation.
+            && (
+                is_int($claims['exp'] ?? null)
+                || is_float($claims['exp'] ?? null)
+            )
+            && $claims['exp'] > $now - self::CLOCK_LEEWAY
+
+            // Issued-at validation.
+            && (
+                is_int($claims['iat'] ?? null)
+                || is_float($claims['iat'] ?? null)
+            )
+            && $claims['iat'] <= $now + self::CLOCK_LEEWAY
+            && $claims['iat'] < $claims['exp']
+
+            // Optional not-before validation.
+            && (
+                !array_key_exists('nbf', $claims)
+                || (
+                    (
+                        is_int($claims['nbf'])
+                        || is_float($claims['nbf'])
+                    )
+                    && $claims['nbf'] <= $now + self::CLOCK_LEEWAY
+                )
+            )
+
+            // Replay protection.
+            && is_string($claims['nonce'] ?? null)
+            && hash_equals($nonce, $claims['nonce']);
 
         if (!$valid) {
-            throw new Exception(Piwik::translate('RebelOIDC_ExceptionInvalidIdToken'));
+            throw new Exception(
+                Piwik::translate(
+                    'RebelOIDC_ExceptionInvalidIdToken'
+                )
+            );
         }
     }
 

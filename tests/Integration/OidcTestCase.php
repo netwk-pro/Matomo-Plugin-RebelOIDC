@@ -9,6 +9,8 @@ use Piwik\Db;
 use Piwik\Plugins\Login\PasswordVerifier;
 use Piwik\Plugins\RebelOIDC\Auth;
 use Piwik\Plugins\RebelOIDC\Controller;
+use Piwik\Plugins\RebelOIDC\Provider;
+use Piwik\Plugins\RebelOIDC\tests\TestKeys;
 use Piwik\Plugins\RebelOIDC\SystemSettings;
 use Piwik\Plugins\UsersManager\API as UsersManagerAPI;
 use Piwik\Session\SessionInitializer;
@@ -32,6 +34,11 @@ abstract class OidcTestCase extends IntegrationTestCase
      * @var bool
      */
     protected $isPasswordConfirmed = false;
+
+    /** @var \OpenSSLAsymmetricKey */
+    protected $testSigningKey;
+
+    protected string $testJwksUrl;
 
     public function setUp(): void
     {
@@ -66,6 +73,21 @@ abstract class OidcTestCase extends IntegrationTestCase
         $this->logInAs('anonymous');
 
         $this->controller = $this->createController();
+
+        // Only fake providers use our generated signing key. Live Keycloak uses discovery.
+        if ($this->controller instanceof ControllerWithFakeProvider) {
+            $this->testSigningKey = TestKeys::createRsaKey();
+            $this->testJwksUrl = 'https://idp.example/keys/' . bin2hex(random_bytes(8));
+            $this->set(['issuer' => 'https://idp.example', 'jwksUrl' => $this->testJwksUrl]);
+
+            $provider = $this->getMockBuilder(Provider::class)->onlyMethods(['request'])->getMock();
+            $provider->method('request')->willReturnCallback(function (string $url) {
+                return $url === $this->testJwksUrl
+                    ? ['status' => 200, 'data' => json_encode($this->testJwks())]
+                    : ['status' => 404, 'data' => '{}'];
+            });
+            StaticContainer::getContainer()->set(Provider::class, $provider);
+        }
     }
 
     protected function createController(): Controller
@@ -110,7 +132,7 @@ abstract class OidcTestCase extends IntegrationTestCase
 
     /**
      * Comes back from the provider with exactly these answers. The ID token gets the nonce of the
-     * login and an expiry, unless it has them.
+     * login, an issued-at time and an expiry, unless it has them. It is signed with the fake provider key.
      *
      * @return string what the callback ended with: the redirect or the error
      */
@@ -122,7 +144,11 @@ abstract class OidcTestCase extends IntegrationTestCase
 
         $this->controller->tokens = (object) ['access_token' => $accessToken, 'token_type' => 'Bearer'];
         if ($idClaims !== null) {
-            $this->controller->tokens->id_token = $this->jwt($idClaims + ['exp' => time() + 300, 'nonce' => $_SESSION['loginoidc_nonce'] ?? '']);
+            $this->controller->tokens->id_token = $this->signedJwt($idClaims + [
+                'iat' => time(),
+                'exp' => time() + 300,
+                'nonce' => $_SESSION['loginoidc_nonce'] ?? '',
+            ]);
         }
         $this->controller->userInfo = (object) $userInfo;
 
@@ -148,6 +174,17 @@ abstract class OidcTestCase extends IntegrationTestCase
         return '';
     }
 
+    protected function testJwks(): array
+    {
+        return ['keys' => [TestKeys::toJwk($this->testSigningKey, 'fixture-key')]];
+    }
+
+    protected function signedJwt(array $claims): string
+    {
+        return TestKeys::sign(['alg' => 'RS256', 'kid' => 'fixture-key'], $claims, $this->testSigningKey);
+    }
+
+    // Intentionally unsigned: used for invalid-token tests and untrusted access tokens.
     protected function jwt(array $claims): string
     {
         return 'e30.' . rtrim(strtr(base64_encode(json_encode($claims, JSON_UNESCAPED_UNICODE)), '+/', '-_'), '=') . '.signature';

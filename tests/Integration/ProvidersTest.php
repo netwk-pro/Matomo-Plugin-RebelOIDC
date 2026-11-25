@@ -10,7 +10,7 @@ use Piwik\Plugins\UsersManager\Model;
  *
  * - settings: the settings of the plugin for the provider
  * - accessToken: its claims, or the token itself when it is not a JWT
- * - idToken: its claims, or null when the provider sends none
+ * - idToken: its claims, or null for a provider that cannot authenticate under strict OIDC
  * - userInfo: the response of the user info endpoint
  * - expect: the user ID, username and email the login results in, whether the provider says the
  *   email is verified, and the roles it gives
@@ -79,15 +79,32 @@ class ProvidersTest extends OidcTestCase
     {
         $providers = [];
         foreach (glob(__DIR__ . '/../resources/providers/*.json') as $file) {
-            $providers[basename($file, '.json')] = [json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR)];
+            $provider = json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
+            if ($provider['idToken'] !== null) {
+                $providers[basename($file, '.json')] = [$provider];
+            }
         }
 
         return $providers;
     }
 
+    public function testOAuthOnlyGitHubFixtureIsRefused()
+    {
+        $provider = json_decode(file_get_contents(__DIR__ . '/../resources/providers/github.json'), true, 512, JSON_THROW_ON_ERROR);
+        $this->set($provider['settings'] + ['allowSignup' => true, 'trustUnverifiedEmail' => true]);
+        $this->link('anna', $provider['expect']['providerUser']);
+
+        $message = $this->answerAs($provider);
+
+        $this->assertStringContainsString('ExceptionInvalidIdToken', $message);
+        $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
+        $this->assertSame(['anna' => $provider['expect']['providerUser']], $this->getLinks());
+    }
+
     private function answerAs(array $provider): string
     {
-        $accessToken = is_array($provider['accessToken']) ? $this->jwt($provider['accessToken']) : $provider['accessToken'];
+        $this->set(['issuer' => $provider['idToken']['iss'] ?? 'https://idp.example']);
+        $accessToken = is_array($provider['accessToken']) ? $this->signedJwt($provider['accessToken']) : $provider['accessToken'];
 
         return $this->answer($accessToken, $provider['idToken'], $provider['userInfo']);
     }

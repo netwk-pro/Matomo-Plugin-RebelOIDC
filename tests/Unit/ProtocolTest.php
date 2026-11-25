@@ -44,9 +44,9 @@ class ProtocolTest extends TestCase
 
     public function testCheckIdTokenAcceptsATokenForThisLogin()
     {
-        Protocol::checkIdToken($this->getClaims(), 'matomo', 'https://idp.example/', 'the-nonce', self::NOW);
-        Protocol::checkIdToken($this->getClaims(), 'matomo', '', 'the-nonce', self::NOW);
-        Protocol::checkIdToken($this->getClaims(['aud' => ['matomo', 'other'], 'azp' => 'matomo']), 'matomo', '', 'the-nonce', self::NOW);
+        Protocol::checkIdToken($this->getClaims(), 'matomo', 'https://idp.example', 'the-nonce', self::NOW);
+        Protocol::checkIdToken($this->getClaims(['aud' => ['matomo'], 'azp' => 'matomo']), 'matomo', 'https://idp.example', 'the-nonce', self::NOW);
+        Protocol::checkIdToken($this->getClaims(['nbf' => self::NOW + 30]), 'matomo', 'https://idp.example', 'the-nonce', self::NOW);
 
         $this->addToAssertionCount(3);
     }
@@ -75,6 +75,40 @@ class ProtocolTest extends TestCase
             'no nonce' => [['nonce' => null]],
             'another issuer' => [['iss' => 'https://evil.example']],
             'no issuer' => [['iss' => null]],
+            'issuer trailing slash differs' => [['iss' => 'https://idp.example/']],
+            'no subject' => [['sub' => null]],
+            'empty subject' => [['sub' => '']],
+            'non-string subject' => [['sub' => 123]],
+            'extra untrusted audience even with azp' => [['aud' => ['matomo', 'other'], 'azp' => 'matomo']],
+            'wrong authorized party with one audience' => [['azp' => 'other']],
+            'invalid audience type' => [['aud' => ['client' => 'matomo']]],
+            'non-numeric expiry type' => [['exp' => (string) (self::NOW + 300)]],
+            'no issued-at' => [['iat' => null]],
+            'future issued-at' => [['iat' => self::NOW + 61]],
+            'issued-at not before expiry' => [['iat' => self::NOW + 30, 'exp' => self::NOW + 30]],
+            'invalid issued-at type' => [['iat' => (string) self::NOW]],
+            'not yet valid' => [['nbf' => self::NOW + 61]],
+            'invalid not-before type' => [['nbf' => 'tomorrow']],
+            'empty nonce' => [['nonce' => '']],
+        ];
+    }
+
+    /**
+     * @dataProvider getMissingAuthenticationContext
+     */
+    public function testCheckIdTokenRefusesMissingAuthenticationContext(string $clientId, string $issuer, string $nonce)
+    {
+        $this->expectException(\Exception::class);
+
+        Protocol::checkIdToken($this->getClaims(), $clientId, $issuer, $nonce, self::NOW);
+    }
+
+    public function getMissingAuthenticationContext(): array
+    {
+        return [
+            'client' => ['', 'https://idp.example', 'the-nonce'],
+            'issuer' => ['matomo', '', 'the-nonce'],
+            'nonce' => ['matomo', 'https://idp.example', ''],
         ];
     }
 
@@ -113,6 +147,7 @@ class ProtocolTest extends TestCase
             'iss' => 'https://idp.example',
             'aud' => 'matomo',
             'exp' => self::NOW + 300,
+            'iat' => self::NOW - 10,
             'nonce' => 'the-nonce',
             'sub' => '1',
         ];

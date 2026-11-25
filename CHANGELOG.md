@@ -1,5 +1,30 @@
 # Change Log
 
+## [6.0.0] - Unreleased (local build)
+
+### Changed
+
+- Update the Matomo compatibility requirements to `>=6.0.0-b1,<7.0.0-b1`.
+- Raise the minimum PHP version to 8.1.
+- Align browser-session authentication results with Matomo 6 authentication context.
+
+### Security
+
+- Reject forced authentication when the local user cannot be found and generate a fresh session token.
+- Require a signed ID token, a configured or discovered issuer and signing keys, and matching subject identifiers.
+- Strengthen ID token claim validation, including issuer, audience, authorized party, subject, expiration, issued-at time, optional not-before time, and nonce.
+- Reset forced authentication after session initialization.
+
+### Fixed
+
+- Make nullable parameter declarations explicit for PHP 8.4 compatibility.
+- Handle providers that do not advertise an end-session endpoint.
+
+### Validation
+
+- Matomo 6.0.0 and Cisco Duo SSO integration testing pending.
+- Local development build; not an official upstream release.
+
 ## [5.2.0] - 2026-11-21
 
 ### Security

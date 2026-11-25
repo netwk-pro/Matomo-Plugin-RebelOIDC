@@ -62,10 +62,10 @@ trait Helper
      * Create a link between the remote user and the currently signed in user.
      *
      * @param  string  $providerUserId
-     * @param  string  $matomoUserLogin Override the local user if non-null
+     * @param  string|null  $matomoUserLogin Override the local user if non-null
      * @return void
      */
-    private function linkAccount(string $providerUserId, string $matomoUserLogin = null)
+    private function linkAccount(string $providerUserId, ?string $matomoUserLogin = null)
     {
         if ($matomoUserLogin === null) {
             $matomoUserLogin = Piwik::getCurrentUserLogin();

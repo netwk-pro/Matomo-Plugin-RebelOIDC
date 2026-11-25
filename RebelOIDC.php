@@ -115,7 +115,7 @@ class RebelOIDC extends Plugin
      * @param  string|null  $payload
      * @return void
      */
-    public function renderRebelOIDCMod(string &$out, string $payload = null)
+    public function renderRebelOIDCMod(string &$out, ?string $payload = null)
     {
         if (!empty($payload) && $payload === "bottom") {
             $content = FrontController::getInstance()->dispatch("RebelOIDC", "loginMod");
@@ -134,7 +134,7 @@ class RebelOIDC extends Plugin
      * @param  string|null  $payload
      * @return void
      */
-    public function renderConfirmPasswordMod(string &$out, string $payload = null)
+    public function renderConfirmPasswordMod(string &$out, ?string $payload = null)
     {
         if (!empty($payload) && $payload === "bottom") {
             $content = FrontController::getInstance()->dispatch("RebelOIDC", "confirmPasswordMod");
@@ -156,7 +156,8 @@ class RebelOIDC extends Plugin
             return;
         }
         try {
-            $endSessionUrl = StaticContainer::get(Provider::class)->getEndpoints($settings)['endSessionUrl'];
+            $endpoints = StaticContainer::get(Provider::class)->getEndpoints($settings);
+            $endSessionUrl = $endpoints['endSessionUrl'] ?? '';
         } catch (\Exception $e) {
             // Logging out of Matomo has to work when the provider cannot be reached.
             $endSessionUrl = '';

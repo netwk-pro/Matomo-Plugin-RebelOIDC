@@ -52,9 +52,50 @@ class LoginTest extends OidcTestCase
     {
         $this->link('anna', 'idp-anna');
 
-        $message = $this->comeBack(['sub' => 'idp-anna'], [], 'gho_16C7e42F292c6912E7710c838347Ae178B4a', false);
+        $message = $this->comeBack(['sub' => 'idp-anna'], [], 'gho_16C7e42F292c6912E7710c838347Ae178B4a');
 
         $this->assertStringContainsString(self::REDIRECT . 'index.php', $message);
+    }
+
+    public function testAResponseWithoutAnIdTokenIsRefused()
+    {
+        $this->link('anna', 'idp-anna');
+
+        $message = $this->comeBack(['sub' => 'idp-anna'], [], 'opaque-access-token', false);
+
+        $this->assertStringContainsString('ExceptionInvalidIdToken', $message);
+        $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
+    }
+
+    public function testAnIdTokenWithoutConfiguredKeysIsRefused()
+    {
+        $this->link('anna', 'idp-anna');
+        $this->set(['jwksUrl' => '']);
+
+        $this->assertStringContainsString('ExceptionInvalidIdToken', $this->comeBack(['sub' => 'idp-anna']));
+        $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
+    }
+
+    public function testAnIdTokenWithoutConfiguredIssuerIsRefused()
+    {
+        $this->link('anna', 'idp-anna');
+        $this->set(['issuer' => '']);
+
+        $this->assertStringContainsString('ExceptionInvalidIdToken', $this->comeBack(['sub' => 'idp-anna']));
+        $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
+    }
+
+    public function testUserInfoWithoutASubjectIsRefused()
+    {
+        $this->link('anna', 'idp-anna');
+        $this->set(['userInfoId' => 'email']);
+
+        $message = $this->answer('opaque-access-token', [
+            'iss' => 'https://idp.example', 'aud' => 'matomo', 'sub' => 'idp-anna',
+        ], ['email' => 'anna@example.org']);
+
+        $this->assertStringContainsString('ExceptionInvalidResponse', $message);
+        $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
     }
 
     /**
@@ -78,6 +119,11 @@ class LoginTest extends OidcTestCase
             'nonce of another login' => [['nonce' => 'replayed']],
             'expired' => [['exp' => time() - 3600]],
             'another issuer' => [['iss' => 'https://evil.example']],
+            'missing subject' => [['sub' => null]],
+            'missing issued-at' => [['iat' => null]],
+            'future issued-at' => [['iat' => time() + 600]],
+            'wrong authorized party' => [['azp' => 'other']],
+            'untrusted additional audience' => [['aud' => ['matomo', 'other'], 'azp' => 'matomo']],
         ];
     }
 
@@ -295,8 +341,9 @@ class LoginTest extends OidcTestCase
             'authorization_endpoint' => 'https://published.example/authorize',
             'token_endpoint' => 'https://published.example/token',
             'userinfo_endpoint' => 'https://published.example/userinfo',
+            'jwks_uri' => $this->testJwksUrl,
         ]);
-        $this->set(['discoveryUrl' => 'https://idp.example/.well-known/openid-configuration', 'authorizeUrl' => '', 'tokenUrl' => '', 'userInfoUrl' => '']);
+        $this->set(['discoveryUrl' => 'https://idp.example/.well-known/openid-configuration', 'authorizeUrl' => '', 'tokenUrl' => '', 'userInfoUrl' => '', 'issuer' => '', 'jwksUrl' => '']);
 
         $this->assertStringStartsWith('https://published.example/authorize?', $this->signIn());
         $this->assertStringContainsString('ExceptionInvalidIdToken', $this->comeBack(['sub' => 'idp-anna']));
@@ -450,7 +497,7 @@ class LoginTest extends OidcTestCase
         ];
     }
 
-    public function testTheIdTokenHasToBeSignedByTheProviderWhenItsKeysAreKnown()
+    public function testTheIdTokenHasToBeSignedByTheProvider()
     {
         $this->link('anna', 'idp-anna');
         $key = TestKeys::createRsaKey();
@@ -458,6 +505,20 @@ class LoginTest extends OidcTestCase
         $this->set(['jwksUrl' => 'https://idp.example/keys']);
 
         $this->assertStringContainsString('ExceptionInvalidIdToken', $this->comeBack(['sub' => 'idp-anna']));
+        // An explicitly unsigned ID token must fail, even with otherwise valid claims.
+        $this->signIn();
+        $this->controller->tokens = (object) [
+            'access_token' => 'opaque-access-token',
+            'id_token' => $this->jwt([
+                'iss' => 'https://idp.example', 'aud' => 'matomo', 'sub' => 'idp-anna',
+                'iat' => time(), 'exp' => time() + 300, 'nonce' => $_SESSION['loginoidc_nonce'],
+            ]),
+        ];
+        $this->controller->userInfo = (object) ['sub' => 'idp-anna'];
+        $this->assertStringContainsString('ExceptionInvalidIdToken', $this->finishLogin([
+            'state' => $_SESSION['loginoidc_state'], 'code' => 'the-code',
+        ]));
+
         $this->assertStringContainsString('ExceptionInvalidIdToken', $this->comeBackWithIdTokenSignedBy(TestKeys::createRsaKey()));
         $this->assertArrayNotHasKey('loginoidc_auth', $_SESSION);
 
@@ -486,7 +547,7 @@ class LoginTest extends OidcTestCase
     private function comeBackWithIdTokenSignedBy($key, string $accessToken = 'an-opaque-access-token'): string
     {
         $this->signIn();
-        $claims = ['iss' => 'https://idp.example', 'aud' => 'matomo', 'sub' => 'idp-anna', 'exp' => time() + 300, 'nonce' => $_SESSION['loginoidc_nonce']];
+        $claims = ['iss' => 'https://idp.example', 'aud' => 'matomo', 'sub' => 'idp-anna', 'iat' => time(), 'exp' => time() + 300, 'nonce' => $_SESSION['loginoidc_nonce']];
         $this->controller->tokens = (object) ['access_token' => $accessToken, 'id_token' => TestKeys::sign(['alg' => 'RS256', 'kid' => 'k1'], $claims, $key)];
         $this->controller->userInfo = (object) ['sub' => 'idp-anna'];
 
@@ -530,7 +591,13 @@ class LoginTest extends OidcTestCase
     private function publish(int $status, array $document): void
     {
         $provider = $this->getMockBuilder(Provider::class)->onlyMethods(['request'])->getMock();
-        $provider->method('request')->willReturn(['status' => $status, 'data' => json_encode($document)]);
+        $provider->method('request')->willReturnCallback(function (string $url) use ($status, $document) {
+            if ($url === $this->testJwksUrl && !isset($document['keys'])) {
+                return ['status' => 200, 'data' => json_encode($this->testJwks())];
+            }
+
+            return ['status' => $status, 'data' => json_encode($document)];
+        });
         StaticContainer::getContainer()->set(Provider::class, $provider);
     }
 

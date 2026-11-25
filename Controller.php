@@ -239,14 +239,39 @@ class Controller extends \Piwik\Plugin\Controller
             throw new Exception(Piwik::translate("RebelOIDC_ExceptionInvalidResponse"));
         }
 
-        $idToken = empty($tokens->id_token) || !is_string($tokens->id_token) ? null : $tokens->id_token;
+        $idToken = empty($tokens->id_token) || !is_string($tokens->id_token)
+            ? null
+            : $tokens->id_token;
+
         $idClaims = Protocol::decodeJwt($idToken);
-        if ($idClaims !== null) {
-            if ($endpoints['jwksUrl'] !== '' && !$this->isSignedByProvider($idToken, $endpoints['jwksUrl'], true)) {
-                throw new Exception(Piwik::translate("RebelOIDC_ExceptionInvalidIdToken"));
-            }
-            Protocol::checkIdToken($idClaims, $settings->clientId->getValue(), $endpoints['issuer'], $nonce);
+
+        if (
+            $idToken === null
+            || $idClaims === null
+            || empty($endpoints['jwksUrl'])
+            || empty($endpoints['issuer'])
+            || empty($nonce)
+            || empty($verifier)
+        ) {
+            throw new Exception(
+                Piwik::translate("RebelOIDC_ExceptionInvalidIdToken")
+            );
         }
+
+        Protocol::checkSecureUrl($endpoints['jwksUrl']);
+
+        if (!$this->isSignedByProvider($idToken, $endpoints['jwksUrl'], true)) {
+            throw new Exception(
+                Piwik::translate("RebelOIDC_ExceptionInvalidIdToken")
+            );
+        }
+
+        Protocol::checkIdToken(
+            $idClaims,
+            $settings->clientId->getValue(),
+            $endpoints['issuer'],
+            $nonce
+        );
 
         $accessClaims = Protocol::decodeJwt($tokens->access_token) ?? [];
         // With the keys of the provider known, roles and permissions only count when it signed them.
@@ -269,9 +294,17 @@ class Controller extends \Piwik\Plugin\Controller
         }
         $providerUserId = (string) $providerUserId;
 
-        // The user info has to be about the user the ID token was issued for.
-        if (isset($idClaims['sub'], $result->sub) && $idClaims['sub'] !== $result->sub) {
-            throw new Exception(Piwik::translate("RebelOIDC_ExceptionInvalidResponse"));
+        // UserInfo must identify the same subject as the ID token.
+        if (
+            !isset($idClaims['sub'], $result->sub)
+            || !is_string($idClaims['sub'])
+            || !is_string($result->sub)
+            || $idClaims['sub'] === ''
+            || $idClaims['sub'] !== $result->sub
+        ) {
+            throw new Exception(
+                Piwik::translate("RebelOIDC_ExceptionInvalidResponse")
+            );
         }
 
         $emailAttribute = $settings->emailAttribute->getValue() ?: 'email';
@@ -492,7 +525,13 @@ class Controller extends \Piwik\Plugin\Controller
     ) {
         $this->auth->setLogin($user["login"]);
         $this->auth->setForceLogin(true);
-        $this->sessionInitializer->initSession($this->auth);
+
+        try {
+            $this->sessionInitializer->initSession($this->auth);
+        } finally {
+            $this->auth->setForceLogin(false);
+        }
+
         $this->markSessionAsSignedIn($idToken);
         if ($settings->bypassTwoFa->getValue()) {
             $sessionFingerprint = new SessionFingerprint();
